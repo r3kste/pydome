@@ -96,16 +96,16 @@ def test_AGMA_6123_C16_Annex_C():
     F_P = kinetics.force(m=Mass(11.602, MassUnit.KG), alpha=alpha_rP)
     assert F_P.equals(Force(65.808, ForceUnit.NEWTON))
 
-    W_t = Planetary.F_t(
+    W_t_per_mesh = Planetary.W_t_per_mesh(
         F_Nom=kinetics.force(T=T_C, r=center_distance),
         K_gamma=K_gamma,
         K_A=K_A_bearings,
         N_CP=number_of_planets,
     )
-    assert W_t.equals(Force(46630, ForceUnit.NEWTON))
+    assert W_t_per_mesh.equals(Force(46630, ForceUnit.NEWTON))
 
     P_mag = utilities.vector_magnitude(
-        W_t.to(ForceUnit.NEWTON).magnitude, F_P.to(ForceUnit.NEWTON).magnitude
+        W_t_per_mesh.to(ForceUnit.NEWTON).magnitude, F_P.to(ForceUnit.NEWTON).magnitude
     )
     F_eff = Force(P_mag, ForceUnit.NEWTON)
     assert F_eff.equals(Force(46630, ForceUnit.NEWTON))

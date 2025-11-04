@@ -1,4 +1,5 @@
 from math import cos, sin
+from typing import Any, Literal
 
 import optimagic as om
 
@@ -173,18 +174,18 @@ class Planetary(Spur):
         if any(param is None for param in [T_Branch, T_Nom, N_CP]):
             if application_level is None:
                 raise ValueError(
-                    "Either provide all parameters or specify application_level."
+                    "Either provide (T_Branch, T_Nom, N_CP) or application_level."
                 )
 
             # TODO: this is for N_CP = 3 only
-            return 1.0
+            return 1.05
 
         T_Branch_mag = T_Branch.to(TorqueUnit.Nm).magnitude
         T_Nom_mag = T_Nom.to(TorqueUnit.Nm).magnitude
 
         return (T_Branch_mag / T_Nom_mag) * (N_CP)
 
-    def F_t(
+    def W_t_per_mesh(
         *,
         F_Nom: Force,
         K_gamma: float,
@@ -429,12 +430,31 @@ class Planetary(Spur):
         F_clamp_mag = (2 * T_R_mag) / (d_bc_mag * mu)
         return Force(F_clamp_mag, ForceUnit.NEWTON)
 
+    def get_value(attr_name: str, operating_conditions: dict) -> Any:
+        if attr_name in operating_conditions:
+            return operating_conditions[attr_name]
+        else:
+            attr = getattr(Planetary, attr_name, None)
+
+            if callable(attr):
+                import inspect
+
+                sig = inspect.signature(attr)
+
+                params = {}
+                for arg in sig.parameters.keys():
+                    params[arg] = operating_conditions.get(arg)
+                return attr(**params)
+            else:
+                return attr
+
     def _bending_safety_factor(
         *,
         gear: Gear,
+        member_type: Literal["sun", "planet", "ring"],
         other_gear: Gear,
-        operating_conditions: dict,
         is_pinion: bool,
+        **operating_conditions: Any,
     ) -> tuple[int, int, int, int]:
         if is_pinion:
             pinion, driven = gear, other_gear
@@ -445,6 +465,14 @@ class Planetary(Spur):
 
         H = operating_conditions["H"]
         W_t = Planetary.W_t(H=H, V=V)
+
+        N_CP = operating_conditions["N_CP"]
+        K_gamma = Planetary.get_value("K_gamma", operating_conditions)
+        K_A = Planetary.get_value("K_A", operating_conditions)
+
+        W_t_per_mesh = Planetary.W_t_per_mesh(
+            F_Nom=W_t, K_gamma=K_gamma, K_A=K_A, N_CP=N_CP
+        )
 
         power_source = operating_conditions["power_source"]
         driven_machine = operating_conditions["driven_machine"]
@@ -474,7 +502,7 @@ class Planetary(Spur):
         J = Planetary.J(N=gear.n_teeth, other_N=other_gear.n_teeth)
 
         s_b = Planetary.s_b(
-            W_t=W_t,
+            W_t=W_t_per_mesh,
             K_o=K_o,
             K_v=K_v,
             K_s=K_s,
@@ -520,23 +548,42 @@ class Planetary(Spur):
         *,
         sun: Gear,
         planet: Gear,
+        ring: Gear,
         operating_conditions: dict,
+        return_all: bool = False,
     ) -> float:
         """Bending safety factor"""
-        return min(
-            Planetary._bending_safety_factor(
-                gear=sun,
-                other_gear=planet,
-                operating_conditions=operating_conditions,
-                is_pinion=True,
-            ),
-            Planetary._bending_safety_factor(
-                gear=planet,
-                other_gear=sun,
-                operating_conditions=operating_conditions,
-                is_pinion=False,
-            ),
+        s_b_f_SP = Planetary._bending_safety_factor(
+            gear=sun,
+            member_type="sun",
+            other_gear=planet,
+            is_pinion=True,
+            **operating_conditions,
+            gear_mode="external",
         )
+
+        s_b_f_PS = Planetary._bending_safety_factor(
+            gear=planet,
+            member_type="planet",
+            other_gear=sun,
+            is_pinion=False,
+            **operating_conditions,
+            gear_mode="external",
+        )
+
+        s_b_f_PR = Planetary._bending_safety_factor(
+            gear=planet,
+            member_type="planet",
+            other_gear=ring,
+            is_pinion=True,
+            **operating_conditions,
+            gear_mode="internal",
+        )
+
+        if return_all:
+            return s_b_f_SP, s_b_f_PS, s_b_f_PR
+        else:
+            return min(s_b_f_SP, s_b_f_PS, s_b_f_PR)
 
 
 def demo():
@@ -618,10 +665,36 @@ def demo():
         1.5 * estimated_face_width,
     )
 
+    ring = Gear(
+        n_teeth=N_R,
+        rpm=AngularVelocity(0, AngularVelocityUnit.RPM),
+        pitch_diameter=solver.UNKNOWN,
+        face_width=solver.UNKNOWN,
+        desired_cycles=1e10,
+        material=Steel,
+        quality_number=6,
+        is_crowned=False,
+        is_through_hardened=True,
+        pressure_angle=Angle(20, AngleUnit.DEGREE),
+    )
+    unknowns["ring.pitch_diameter"] = Length
+    unknowns["ring.face_width"] = Length
+    bounds["ring.pitch_diameter"] = (
+        0.5 * (esimated_d_S + 2 * esimated_d_P),
+        1.5 * (esimated_d_S + 2 * esimated_d_P),
+    )
+    bounds["ring.face_width"] = (0.5 * estimated_face_width, 1.5 * estimated_face_width)
+
     constraints = [
         om.EqualityConstraint(
             selector=lambda params: [
                 params["planet.face_width"],
+                params["sun.face_width"],
+            ]
+        ),
+        om.EqualityConstraint(
+            selector=lambda params: [
+                params["ring.face_width"],
                 params["sun.face_width"],
             ]
         ),
@@ -641,10 +714,20 @@ def demo():
             func=lambda x: x[1] / x[0],
             value=face_width_to_diameter_ratio,
         ),
+        om.NonlinearConstraint(
+            selector=lambda params: [
+                params["ring.pitch_diameter"],
+                params["sun.pitch_diameter"],
+                params["planet.pitch_diameter"],
+            ],
+            func=lambda x: x[0] - (x[1] + 2 * x[2]),
+            value=0,
+        ),
     ]
 
     operating_conditions = dict(
         H=Power(600, PowerUnit.WATT),
+        N_CP=N_CP,
         power_source="uniform",
         driven_machine="uniform",
         gearing_condition="enclosed_commercial",
@@ -652,7 +735,8 @@ def demo():
         R=0.9,
         S_F=1.0,
         S_H=1.0,
-        gear_mode="external",
+        application_level=2,
+        K_A=1,
     )
 
     res, params = solver.solve_for_parameters(
@@ -661,6 +745,7 @@ def demo():
         known_params={
             "sun": sun,
             "planet": planet,
+            "ring": ring,
             "operating_conditions": operating_conditions,
         },
         unknown_params=unknowns,
@@ -670,18 +755,11 @@ def demo():
 
     print("Optimization Result:", params)
     print(
-        "Final Bending Safety Factor for Sun:",
-        Planetary._bending_safety_factor(
-            gear=sun,
-            other_gear=planet,
+        Planetary.bending_safety_factor(
+            sun=sun,
+            planet=planet,
+            ring=ring,
             operating_conditions=operating_conditions,
-            is_pinion=True,
-        ),
-        "\nFinal Bending Safety Factor for Planet:",
-        Planetary._bending_safety_factor(
-            gear=planet,
-            other_gear=sun,
-            operating_conditions=operating_conditions,
-            is_pinion=False,
-        ),
+            return_all=True,
+        )
     )
