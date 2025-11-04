@@ -48,8 +48,10 @@ def test_example_15_1():
     assert K_m == approx(1.254)
 
     I = Bevel.I(N_pinion=N, N_gear=N)
-    J_P = 0.216
-    J_G = 0.216
+    assert I == approx(0.065, rel=2e-3)
+
+    J_P = Bevel.J(N_gear=N, N_mate=N)
+    assert J_P == approx(0.216, rel=4e-3)
 
     K_L = Bevel.K_L(N_L=L, is_critical=True)
     assert K_L == approx(1)
