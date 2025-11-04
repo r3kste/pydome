@@ -1,12 +1,12 @@
 from pydome.gears.bevel import Bevel
-from pydome.materials import *
+from pydome.materials import *  # noqa: F403
 from pydome.solver import solve_for_parameters
 from pydome.units import *  # noqa: F403
 from pydome.utilities import approx
 
 
 def test_example_15_1():
-    P_d = InverseLength(5, InverseLengthUnit.PER_INCH)
+    P = InverseLength(5, InverseLengthUnit.PER_INCH)
     N = 25
     F = Length(1.1, LengthUnit.INCH)
     phi = Angle(20, AngleUnit.DEGREE)
@@ -23,7 +23,7 @@ def test_example_15_1():
     R = 0.99
     n = AngularVelocity(600, AngularVelocityUnit.RPM)
 
-    d_p = Bevel.d(N=N, P_d=P_d)
+    d_p = Bevel.d(N=N, P=P)
     assert d_p.equals(Length(5.0, LengthUnit.INCH))
 
     V_t = Bevel.V(d=d_p, n=n)
@@ -38,7 +38,7 @@ def test_example_15_1():
     V_t_max = Bevel.V_t_max(Q_v=Q_v)
     assert V_t_max.equals(Velocity(4769, VelocityUnit.FPM))
 
-    K_s = Bevel.K_s(P_d=P_d)
+    K_s = Bevel.K_s(P=P)
     assert K_s == approx(0.529)
 
     K_mb = Bevel.K_mb(no_of_straddling_members=no_of_straddling_members)
@@ -86,7 +86,7 @@ def test_example_15_1():
         func=Bevel.s_t,
         target_value=s_t,
         known_params=dict(
-            P_d=P_d,
+            P=P,
             F=F,
             K_o=K_o,
             K_v=K_v,
@@ -165,7 +165,7 @@ def test_example_15_1():
         func=Bevel.s_t,
         target_value=s_t,
         known_params=dict(
-            P_d=P_d,
+            P=P,
             F=F,
             K_o=K_o,
             K_v=K_v,

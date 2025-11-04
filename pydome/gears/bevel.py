@@ -1,4 +1,4 @@
-from math import atan, atan2, cos, exp, log, log10, pi, sin, sqrt, tan
+from math import atan, log10, pi, sin, sqrt, tan
 from typing import Literal
 
 import numpy as np
@@ -9,51 +9,6 @@ from pydome.units import *  # noqa: F403
 
 
 class Bevel(Spur):
-    def d(*, N: int, P_d: InverseLength) -> Length:
-        """
-        Pitch diameter at large end
-
-        Args:
-            N (int): Number of teeth
-            P_d (InverseLength): Outer transverse diametral pitch
-        """
-
-        P_d_mag = P_d.to(InverseLengthUnit.PER_INCH).magnitude
-
-        d_mag = N / P_d_mag
-        return Length(d_mag, LengthUnit.INCH)
-
-    def V(*, d: Length, n: AngularVelocity) -> Velocity:
-        """
-        Pitch-line velocity at outer pitch circle
-
-        Args:
-            d (Length): Pitch diameter
-            n (AngularVelocity): Rotational speed
-        """
-
-        d_mag = d.to(LengthUnit.INCH).magnitude
-        n_mag = n.to(AngularVelocityUnit.RPM).magnitude
-        V_mag = (pi * d_mag * n_mag) / 12
-        return Velocity(V_mag, VelocityUnit.FPM)
-
-    def W_t(
-        *,
-        H: Power,
-        V: Velocity,
-    ) -> Force:
-        """Tangential Load
-
-        Args:
-            H (Power): Power transmitted
-            V (Velocity): Pitch line velocity
-        """
-
-        H_mag = H.to(PowerUnit.HP).magnitude
-        V_mag = V.to(VelocityUnit.FPM).magnitude
-        W_t_mag = (33000 * H_mag) / V_mag
-        return Force(W_t_mag, ForceUnit.LBF)
-
     def cone_distance(*, d_P: Length, d_G: Length, shaft_angle: Angle) -> Length:
         """
         Outer cone distance
@@ -77,23 +32,22 @@ class Bevel(Spur):
         Args:
             N_p: Pinion teeth
             N_g: Gear teeth
-            shaft_angle_deg: Shaft angle (degrees, default 90)
+            shaft_angle_deg: Shaft angle
         """
         shaft_angle_rad = shaft_angle_deg * pi / 180
         gamma_p = atan(N_p / N_g * tan(shaft_angle_rad / 2))
         gamma_g = atan(N_g / N_p * tan(shaft_angle_rad / 2))
         return gamma_p, gamma_g
 
-    @staticmethod
-    def face_width_max(A_0: float, P_d: float) -> float:
+    def face_width_max(A_0: float, P: float) -> float:
         """
         Maximum recommended face width
 
         Args:
             A_0: Outer cone distance
-            P_d: Outer transverse diametral pitch (teeth/inch)
+            P: Outer transverse diametral pitch
         """
-        return min(0.3 * A_0, 10 / P_d)
+        return min(0.3 * A_0, 10 / P)
 
     def K_o(
         *,
@@ -137,33 +91,14 @@ class Bevel(Spur):
         }
         return table[power_source][driven_machine]
 
-    def K_v(
-        *,
-        V: Velocity,
-        Q_v: int,
-    ) -> float:
-        """Dynamic Factor
-
-        Args:
-            V (Velocity): Pitch line velocity
-            Q_v (int): Quality number
-        """
-
-        return Spur.K_v(V=V, Q_v=Q_v)
-
-    def V_t_max(*, Q_v: int) -> Velocity:
-        """Maximum pitch line velocity"""
-
-        return Spur.V_t_max(Q_v=Q_v)
-
-    def K_s(*, P_d: InverseLength) -> float:
+    def K_s(*, P: InverseLength) -> float:
         """
         Size factor for bending K_s
 
         Args:
-            P_d: Outer transverse diametral pitch
+            P: Outer transverse diametral pitch
         """
-        P_d_mag = P_d.to(InverseLengthUnit.PER_INCH).magnitude
+        P_d_mag = P.to(InverseLengthUnit.PER_INCH).magnitude
 
         if P_d_mag <= 16:
             return 0.4867 + 0.2132 / P_d_mag
@@ -240,7 +175,7 @@ class Bevel(Spur):
         Temperature factor KT
 
         Args:
-            T_f: Gear blank or oil temperature (°F, default 70°F)
+            T_f: Gear blank or oil temperature
         """
 
         t_mag = t.to(TemperatureUnit.FAHRENHEIT).magnitude
@@ -255,7 +190,7 @@ class Bevel(Spur):
         Reliability factor for bending KR
 
         Args:
-            R: Reliability (0.50 to 0.9999)
+            R: Reliability
         """
 
         if R == 0.5:
@@ -270,13 +205,12 @@ class Bevel(Spur):
             else:
                 raise ValueError("Reliability R must be between 0.50 and 0.999")
 
-    @staticmethod
     def C_R(*, R: float) -> float:
         """
         Reliability factor for pitting CR
 
         Args:
-            R: Reliability (0.50 to 0.9999)
+            R: Reliability
         """
 
         return np.sqrt(Bevel.K_R(R=R))
@@ -316,32 +250,6 @@ class Bevel(Spur):
                 return 1.3558 * (N_L ** (-0.0178))
         else:
             raise ValueError("N_L must be between 1e2 and 1e10")
-
-    def C_H(
-        *,
-        m_G: float,
-        H_B_P: float | None,
-        f_P: float | None,
-        H_B_G: float,
-        is_pinion: bool,
-    ):
-        """Hardness Ratio Factor for Pitting Resistance
-
-        Args:
-            N_P (int): Pinion teeth
-            N_G (int): Gear teeth
-            H_BP (float): Brinell Hardness of Pinion
-            f_P (float): Surface finish factor of Pinion
-            H_BG (float): Brinell Hardness of Gear
-        """
-
-        return Spur.C_H(
-            m_G=m_G,
-            H_B_P=H_B_P,
-            f_P=f_P,
-            H_B_G=H_B_G,
-            is_pinion=is_pinion,
-        )
 
     # arr[gear] = [(mate, J), ...]
     _arr_J = {
@@ -469,7 +377,7 @@ class Bevel(Spur):
         *,
         W_t: Force,
         F: Length,
-        P_d: InverseLength,
+        P: InverseLength,
         K_o: float,
         K_v: float,
         K_s: float,
@@ -483,7 +391,7 @@ class Bevel(Spur):
         Args:
             W_t: Tangential load
             F: Face width
-            P_d: Outer transverse diametral pitch
+            P: Outer transverse diametral pitch
             K_o: Overload factor
             K_v: Dynamic factor
             K_s: Size factor for bending
@@ -494,7 +402,7 @@ class Bevel(Spur):
 
         W_t_mag = W_t.to(ForceUnit.LBF).magnitude
         F_mag = F.to(LengthUnit.INCH).magnitude
-        P_d_mag = P_d.to(InverseLengthUnit.PER_INCH).magnitude
+        P_d_mag = P.to(InverseLengthUnit.PER_INCH).magnitude
 
         s_t_mag = (W_t_mag * K_o * K_v * K_s * K_m * P_d_mag) / (K_x * F_mag * J)
         return Stress(s_t_mag, StressUnit.PSI)
@@ -515,7 +423,7 @@ class Bevel(Spur):
         Contact (pitting) stress at large end of tooth
 
         Args:
-            W_t: Tangential load (lbf)
+            W_t: Tangential load
             F: Face width
             d_p: Pinion pitch diameter at large end
             K_o: Overload factor
@@ -524,7 +432,7 @@ class Bevel(Spur):
             C_s: Size factor for pitting
             C_xc: Crowning factor for pitting
             I: Geometry factor for pitting resistance
-            C_p: Elastic coefficient (psi^0.5, default 2290 for steel)
+            C_p: Elastic coefficient
         """
         C_p_mag = C_p.to(SqrtPressureUnit.SQRT_PSI).magnitude
         W_t_mag = W_t.to(ForceUnit.LBF).magnitude
@@ -607,7 +515,7 @@ class Bevel(Spur):
     def power_rating_bending(
         N_p: int,
         N_g: int,
-        P_d: float,
+        P: float,
         F: float,
         n_p: float,
         HB_p: float,
@@ -626,27 +534,27 @@ class Bevel(Spur):
         Args:
             N_p: Pinion teeth
             N_g: Gear teeth
-            P_d: Outer transverse diametral pitch (teeth/inch)
+            P: Outer transverse diametral pitch
             F: Face width
-            n_p: Pinion speed (rpm)
+            n_p: Pinion speed
             HB_p: Pinion Brinell Hardness
             HB_g: Gear Brinell Hardness
-            grade: Gear quality grade (1 or 2)
+            grade: Gear quality grade
             is_crowned: Whether teeth are crowned
             Q_v: Transmission accuracy number
-            R: Reliability (0.50 to 0.9999)
-            N_L: Number of load cycles (pinion revolutions)
+            R: Reliability
+            N_L: Number of load cycles
             K_o: Overload factor
             SF: Safety factor for bending
         """
-        d_p = Bevel.d(N_p, P_d)
-        d_g = Bevel.d(N_g, P_d)
+        d_p = Bevel.d(N_p, P)
+        d_g = Bevel.d(N_g, P)
         V_t = Bevel.V(d_p, n_p)
 
         J_p, J_g = Bevel.J(N_p, N_g)
 
         Kv_val = Bevel.K_v(V_t, Q_v)
-        Ks_val = Bevel.K_s(P_d)
+        Ks_val = Bevel.K_s(P)
         K_mb = 1.25
         Km_val = Bevel.K_m(F, K_mb)
         Kx_val = Bevel.K_x()
@@ -657,7 +565,7 @@ class Bevel(Spur):
         St_p = Bevel.S_t(HB_p, grade, True)
         s_t_all = St_p * KL_val * SF * KT_val * KR_val
 
-        W_t_perm = (s_t_all * P_d * F * J_p) / (K_o * Kv_val * Ks_val * Km_val * Kx_val)
+        W_t_perm = (s_t_all * P * F * J_p) / (K_o * Kv_val * Ks_val * Km_val * Kx_val)
 
         H_bending = W_t_perm * V_t / 33000
 
@@ -666,7 +574,7 @@ class Bevel(Spur):
     def power_rating_wear(
         N_p: int,
         N_g: int,
-        P_d: float,
+        P: float,
         F: float,
         n_p: float,
         HB_p: float,
@@ -686,21 +594,21 @@ class Bevel(Spur):
         Args:
             N_p: Pinion teeth
             N_g: Gear teeth
-            P_d: Outer transverse diametral pitch (teeth/inch)
+            P: Outer transverse diametral pitch 
             F: Face width
-            n_p: Pinion speed (rpm)
+            n_p: Pinion speed
             HB_p: Pinion Brinell Hardness
             HB_g: Gear Brinell Hardness
-            grade: Gear quality grade (1 or 2)
+            grade: Gear quality grade
             is_crowned: Whether teeth are crowned
             Q_v: Transmission accuracy number
-            R: Reliability (0.50 to 0.9999)
-            N_L: Number of load cycles (pinion revolutions)
+            R: Reliability 
+            N_L: Number of load cycles 
             K_o: Overload factor
             SH: Safety factor for pitting
-            C_p: Elastic coefficient (psi^0.5, default 2290 for steel)
+            C_p: Elastic coefficient
         """
-        d_p = Bevel.d(N_p, P_d)
+        d_p = Bevel.d(N_p, P)
         V_t = Bevel.V(d_p, n_p)
 
         I_val = Bevel.I(N_p, N_g)
