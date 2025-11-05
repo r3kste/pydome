@@ -368,3 +368,22 @@ class Mass(Unit):
     def __init__(self, magnitude: float, unit: MassUnit):
         self.magnitude = magnitude
         self.unit = unit
+
+
+class AreaUnit(Enum):
+    MM2 = "mm²"
+    INCH2 = "inch²"
+    M2 = "m²"
+
+
+class Area(Unit):
+    primary_unit = AreaUnit.MM2
+    _factors_to_primary = {
+        AreaUnit.MM2: 1.0,
+        AreaUnit.INCH2: 645.16,
+        AreaUnit.M2: 1e6,
+    }
+
+    def __init__(self, magnitude: float, unit: AreaUnit):
+        self.magnitude = magnitude
+        self.unit = unit

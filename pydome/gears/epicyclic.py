@@ -1,4 +1,4 @@
-from math import cos, sin
+from math import cos, sin, ceil
 from typing import Any, Literal
 
 import optimagic as om
@@ -916,7 +916,7 @@ def demo():
 
     n_S_C = Planetary.n_S_C(n_S=n_S, n_C=n_C)
     planet = Gear(
-        n_teeth=24,
+        n_teeth=N_P,
         rpm=Planetary.n_P_C(N_S=N_S, N_R=N_R, N_P=N_P, n_S_C=n_S_C, n_R_C=None),
         pitch_diameter=solver.UNKNOWN,
         face_width=solver.UNKNOWN,
@@ -965,7 +965,7 @@ def demo():
         driven_machine="uniform",
         gearing_condition="enclosed_commercial",
         T=Temperature(25, TemperatureUnit.CELSIUS),
-        R=0.9,
+        R=0.99,
         S_F=2.0,
         S_H=1.4,
         K_gamma=K_gamma,
@@ -989,10 +989,10 @@ def demo():
         om.NonlinearConstraint(
             selector=lambda params: [
                 params["planet.pitch_diameter"],
-                params["planet.face_width"],
+                params["sun.pitch_diameter"],
             ],
-            func=lambda x: x[1] / x[0],
-            value=face_width_to_diameter_ratio,
+            func=lambda x: x[0] / x[1],
+            value=u_e,
         ),
         om.NonlinearConstraint(
             selector=lambda params: [
@@ -1013,121 +1013,132 @@ def demo():
         ),
     ]
 
-    # res, params = solver.solve_for_parameters(
-    #     func=Planetary.safety_factor,
-    #     target_value=1.0,
-    #     known_params={
-    #         "sun": sun,
-    #         "planet": planet,
-    #         "ring": ring,
-    #         "operating_conditions": operating_conditions,
-    #     },
-    #     unknown_params=unknowns,
-    #     bounds=bounds,
-    #     constraints=constraints,
-    # )
-
-    # for key, value in params.items():
-    #     print(f"{key}: \t{round(value.magnitude, 4)} {value.unit}")
-    # print(
-    #     Planetary.safety_factor(
-    #         sun=sun,
-    #         planet=planet,
-    #         ring=ring,
-    #         operating_conditions=operating_conditions,
-    #         return_all=True,
-    #     )
-    # )
-
-    NO = 20
-    diameters_mags = np.linspace(15, 25, NO)
-    facewidths_mags = np.linspace(15, 25, NO)
-
-    mesh_diameters, mesh_facewidths = np.meshgrid(
-        diameters_mags,
-        facewidths_mags,
+    res, params = solver.solve_for_parameters(
+        func=Planetary.safety_factor,
+        target_value=1.0,
+        known_params={
+            "sun": sun,
+            "planet": planet,
+            "ring": ring,
+            "operating_conditions": operating_conditions,
+        },
+        unknown_params=unknowns,
+        bounds=bounds,
+        constraints=constraints,
     )
 
-    # safety_factors = np.zeros(mesh_diameters.shape)
-    sun_bending = np.zeros(mesh_diameters.shape)
-    planet_sun_bending = np.zeros(mesh_diameters.shape)
-    planet_ring_bending = np.zeros(mesh_diameters.shape)
-    ring_bending = np.zeros(mesh_diameters.shape)
-
-    sun_pitting = np.zeros(mesh_diameters.shape)
-    planet_sun_pitting = np.zeros(mesh_diameters.shape)
-    planet_ring_pitting = np.zeros(mesh_diameters.shape)
-    ring_pitting = np.zeros(mesh_diameters.shape)
-
-    for i in range(mesh_diameters.shape[0]):
-        for j in range(mesh_diameters.shape[1]):
-            sun.pitch_diameter = Length(mesh_diameters[i, j], LengthUnit.MM)
-            sun.face_width = Length(mesh_facewidths[i, j], LengthUnit.MM)
-
-            planet.pitch_diameter = Length(mesh_diameters[i, j] * u_e, LengthUnit.MM)
-            planet.face_width = Length(mesh_facewidths[i, j], LengthUnit.MM)
-
-            ring.pitch_diameter = Length(
-                mesh_diameters[i, j] + 2 * mesh_diameters[i, j] * u_e,
-                LengthUnit.MM,
-            )
-            ring.face_width = Length(mesh_facewidths[i, j], LengthUnit.MM)
-
-            (
-                sun_bending[i, j],
-                planet_sun_bending[i, j],
-                planet_ring_bending[i, j],
-                ring_bending[i, j],
-            ) = Planetary.bending_safety_factor(
-                sun=sun,
-                planet=planet,
-                ring=ring,
-                operating_conditions=operating_conditions,
-                return_all=True,
-            )
-
-            (
-                sun_pitting[i, j],
-                planet_sun_pitting[i, j],
-                planet_ring_pitting[i, j],
-                ring_pitting[i, j],
-            ) = Planetary.pitting_safety_factor(
-                sun=sun,
-                planet=planet,
-                ring=ring,
-                operating_conditions=operating_conditions,
-                return_all=True,
-            )
-
-    import matplotlib.pyplot as plt
-
-    fig, ax = plt.subplots(
-        subplot_kw={"projection": "3d"},
-        layout="constrained",
-    )
-    for name, dataset in [
-        ("Sun Bending", sun_bending),
-        # ("Planet-Sun Bending", planet_sun_bending),
-        # ("Planet-Ring Bending", planet_ring_bending),
-        ("Ring Bending", ring_bending),
-        ("Sun Pitting", sun_pitting),
-        # ("Planet-Sun Pitting", planet_sun_pitting),
-        # ("Planet-Ring Pitting", planet_ring_pitting),
-        ("Ring Pitting", ring_pitting),
-    ]:
-        ax.plot_surface(
-            mesh_diameters,
-            mesh_facewidths,
-            dataset,
-            alpha=0.7,
-            label=name,
+    for key, value in params.items():
+        print(
+            f"{key} = Length({ceil(value.to(LengthUnit.MM).magnitude)}, LengthUnit.MM)"
+        )
+        exec(
+            f"{key} = Length({ceil(value.to(LengthUnit.MM).magnitude)}, LengthUnit.MM)"
         )
 
-    ax.set_xlabel("Pitch Diameter (mm)")
-    ax.set_ylabel("Face Width (mm)")
-    ax.set_zlabel("Safety Factor")
-    ax.set_zlim(1, 4)
-    ax.set_title("Planetary Gear Safety Factor Analysis")
+    print(
+        Planetary.safety_factor(
+            sun=sun,
+            planet=planet,
+            ring=ring,
+            operating_conditions=operating_conditions,
+            return_all=True,
+        )
+    )
 
-    plt.legend()
-    plt.show()
+    def plot():
+        NO = 20
+        diameters_mags = np.linspace(15, 25, NO)
+        facewidths_mags = np.linspace(15, 25, NO)
+
+        mesh_diameters, mesh_facewidths = np.meshgrid(
+            diameters_mags,
+            facewidths_mags,
+        )
+
+        # safety_factors = np.zeros(mesh_diameters.shape)
+        sun_bending = np.zeros(mesh_diameters.shape)
+        planet_sun_bending = np.zeros(mesh_diameters.shape)
+        planet_ring_bending = np.zeros(mesh_diameters.shape)
+        ring_bending = np.zeros(mesh_diameters.shape)
+
+        sun_pitting = np.zeros(mesh_diameters.shape)
+        planet_sun_pitting = np.zeros(mesh_diameters.shape)
+        planet_ring_pitting = np.zeros(mesh_diameters.shape)
+        ring_pitting = np.zeros(mesh_diameters.shape)
+
+        for i in range(mesh_diameters.shape[0]):
+            for j in range(mesh_diameters.shape[1]):
+                sun.pitch_diameter = Length(mesh_diameters[i, j], LengthUnit.MM)
+                sun.face_width = Length(mesh_facewidths[i, j], LengthUnit.MM)
+
+                planet.pitch_diameter = Length(
+                    mesh_diameters[i, j] * u_e, LengthUnit.MM
+                )
+                planet.face_width = Length(mesh_facewidths[i, j], LengthUnit.MM)
+
+                ring.pitch_diameter = Length(
+                    mesh_diameters[i, j] + 2 * mesh_diameters[i, j] * u_e,
+                    LengthUnit.MM,
+                )
+                ring.face_width = Length(mesh_facewidths[i, j], LengthUnit.MM)
+
+                (
+                    sun_bending[i, j],
+                    planet_sun_bending[i, j],
+                    planet_ring_bending[i, j],
+                    ring_bending[i, j],
+                ) = Planetary.bending_safety_factor(
+                    sun=sun,
+                    planet=planet,
+                    ring=ring,
+                    operating_conditions=operating_conditions,
+                    return_all=True,
+                )
+
+                (
+                    sun_pitting[i, j],
+                    planet_sun_pitting[i, j],
+                    planet_ring_pitting[i, j],
+                    ring_pitting[i, j],
+                ) = Planetary.pitting_safety_factor(
+                    sun=sun,
+                    planet=planet,
+                    ring=ring,
+                    operating_conditions=operating_conditions,
+                    return_all=True,
+                )
+
+        import matplotlib.pyplot as plt
+
+        fig, ax = plt.subplots(
+            subplot_kw={"projection": "3d"},
+            layout="constrained",
+        )
+        for name, dataset in [
+            ("Sun Bending", sun_bending),
+            # ("Planet-Sun Bending", planet_sun_bending),
+            # ("Planet-Ring Bending", planet_ring_bending),
+            ("Ring Bending", ring_bending),
+            ("Sun Pitting", sun_pitting),
+            # ("Planet-Sun Pitting", planet_sun_pitting),
+            # ("Planet-Ring Pitting", planet_ring_pitting),
+            ("Ring Pitting", ring_pitting),
+        ]:
+            ax.plot_surface(
+                mesh_diameters,
+                mesh_facewidths,
+                dataset,
+                alpha=0.7,
+                label=name,
+            )
+
+        ax.set_xlabel("Pitch Diameter (mm)")
+        ax.set_ylabel("Face Width (mm)")
+        ax.set_zlabel("Safety Factor")
+        ax.set_zlim(1, 4)
+        ax.set_title("Planetary Gear Safety Factor Analysis")
+
+        plt.legend()
+        plt.show()
+
+    # plot()
