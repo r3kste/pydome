@@ -495,7 +495,7 @@ class Planetary(Spur):
         mate_member: Literal["sun", "planet", "ring"],
         is_pinion: bool,
         **operating_conditions: Any,
-    ) -> tuple[int, int, int, int]:
+    ) -> float:
         """Bending safety factor calculation for a gear mesh in a planetary gear set
 
         Args:
@@ -856,16 +856,16 @@ class Planetary(Spur):
             return min(s_b_f, s_c_f)
 
 
-def demo():
+def demo(**inputs):
     from pydome.materials import Steel
 
-    n_S = AngularVelocity(900, AngularVelocityUnit.RPM)
-    n_C = AngularVelocity(225, AngularVelocityUnit.RPM)
+    n_S = inputs.get("n_S", AngularVelocity(900, AngularVelocityUnit.RPM))
+    n_C = inputs.get("n_C", AngularVelocity(225, AngularVelocityUnit.RPM))
     m_G = n_S / n_C
-    H = Power(600, PowerUnit.WATT)
-    N_CP = 3
+    H = inputs.get("H", Power(600, PowerUnit.WATT))
+    N_CP = inputs.get("N_CP", 3)
 
-    N_S = 24  # Assumption
+    N_S = inputs.get("N_S", 24)
     res, params = solver.solve_for_parameters(
         func=Planetary.m_G,
         target_value=m_G,
@@ -877,10 +877,10 @@ def demo():
     N_P = round((N_R - N_S) / 2)
 
     T_Nom = kinetics.torque(P=H, n=n_S)
-    K_gamma = 1.05
-    K = Stress(1.38, StressUnit.MPA)
+    K_gamma = inputs.get("K_gamma", 1.05)
+    K = inputs.get("K", Stress(1.38, StressUnit.MPA))
     C_G = Planetary.C_G(N_P=N_P, N_S=N_S)
-    face_width_to_diameter_ratio = 1.2
+    face_width_to_diameter_ratio = inputs.get("face_width_to_diameter_ratio", 1.2)
     esimated_d_S = Planetary.estimate_d_wS(
         T_Nom=T_Nom,
         K_gamma=K_gamma,
@@ -902,12 +902,12 @@ def demo():
         rpm=n_S,
         pitch_diameter=solver.UNKNOWN,
         face_width=solver.UNKNOWN,
-        desired_cycles=1e10,
+        desired_cycles=inputs.get("desired_cycles", 1e10),
         material=Steel,
-        quality_number=6,
-        is_crowned=False,
-        is_through_hardened=True,
-        pressure_angle=Angle(20, AngleUnit.DEGREE),
+        quality_number=inputs.get("quality_number", 6),
+        is_crowned=inputs.get("is_crowned", False),
+        is_through_hardened=inputs.get("is_through_hardened", True),
+        pressure_angle=inputs.get("pressure_angle", Angle(20, AngleUnit.DEGREE)),
     )
     unknowns["sun.pitch_diameter"] = Length
     unknowns["sun.face_width"] = Length
@@ -920,12 +920,12 @@ def demo():
         rpm=Planetary.n_P_C(N_S=N_S, N_R=N_R, N_P=N_P, n_S_C=n_S_C, n_R_C=None),
         pitch_diameter=solver.UNKNOWN,
         face_width=solver.UNKNOWN,
-        desired_cycles=1e10,
+        desired_cycles=inputs.get("desired_cycles", 1e10),
         material=Steel,
-        quality_number=6,
-        is_crowned=False,
-        is_through_hardened=True,
-        pressure_angle=Angle(20, AngleUnit.DEGREE),
+        quality_number=inputs.get("quality_number", 6),
+        is_crowned=inputs.get("is_crowned", False),
+        is_through_hardened=inputs.get("is_through_hardened", True),
+        pressure_angle=inputs.get("pressure_angle", Angle(20, AngleUnit.DEGREE)),
     )
     unknowns["planet.pitch_diameter"] = Length
     unknowns["planet.face_width"] = Length
@@ -940,12 +940,12 @@ def demo():
         rpm=AngularVelocity(0, AngularVelocityUnit.RPM),
         pitch_diameter=solver.UNKNOWN,
         face_width=solver.UNKNOWN,
-        desired_cycles=1e10,
+        desired_cycles=inputs.get("desired_cycles", 1e10),
         material=Steel,
-        quality_number=6,
-        is_crowned=False,
-        is_through_hardened=True,
-        pressure_angle=Angle(20, AngleUnit.DEGREE),
+        quality_number=inputs.get("quality_number", 6),
+        is_crowned=inputs.get("is_crowned", False),
+        is_through_hardened=inputs.get("is_through_hardened", True),
+        pressure_angle=inputs.get("pressure_angle", Angle(20, AngleUnit.DEGREE)),
     )
     unknowns["ring.pitch_diameter"] = Length
     unknowns["ring.face_width"] = Length
@@ -956,7 +956,7 @@ def demo():
     bounds["ring.face_width"] = (0.5 * estimated_face_width, 1.5 * estimated_face_width)
 
     operating_conditions = dict(
-        H=Power(600, PowerUnit.WATT),
+        H=H,
         N_S=N_S,
         N_R=N_R,
         N_P=N_P,
@@ -972,6 +972,7 @@ def demo():
         application_level=2,
         K_A=1,
     )
+    operating_conditions.update(inputs)
 
     constraints = [
         om.EqualityConstraint(
@@ -1027,118 +1028,11 @@ def demo():
         constraints=constraints,
     )
 
-    for key, value in params.items():
-        print(
-            f"{key} = Length({ceil(value.to(LengthUnit.MM).magnitude)}, LengthUnit.MM)"
-        )
-        exec(
-            f"{key} = Length({ceil(value.to(LengthUnit.MM).magnitude)}, LengthUnit.MM)"
-        )
-
-    print(
-        Planetary.safety_factor(
-            sun=sun,
-            planet=planet,
-            ring=ring,
-            operating_conditions=operating_conditions,
-            return_all=True,
-        )
+    params["_n_P_C"] = Planetary.n_P_C(
+        N_S=N_S,
+        N_P=N_P,
+        N_R=N_R,
+        n_S_C=n_S_C,
+        n_R_C=None,
     )
-
-    def plot():
-        NO = 20
-        diameters_mags = np.linspace(15, 25, NO)
-        facewidths_mags = np.linspace(15, 25, NO)
-
-        mesh_diameters, mesh_facewidths = np.meshgrid(
-            diameters_mags,
-            facewidths_mags,
-        )
-
-        # safety_factors = np.zeros(mesh_diameters.shape)
-        sun_bending = np.zeros(mesh_diameters.shape)
-        planet_sun_bending = np.zeros(mesh_diameters.shape)
-        planet_ring_bending = np.zeros(mesh_diameters.shape)
-        ring_bending = np.zeros(mesh_diameters.shape)
-
-        sun_pitting = np.zeros(mesh_diameters.shape)
-        planet_sun_pitting = np.zeros(mesh_diameters.shape)
-        planet_ring_pitting = np.zeros(mesh_diameters.shape)
-        ring_pitting = np.zeros(mesh_diameters.shape)
-
-        for i in range(mesh_diameters.shape[0]):
-            for j in range(mesh_diameters.shape[1]):
-                sun.pitch_diameter = Length(mesh_diameters[i, j], LengthUnit.MM)
-                sun.face_width = Length(mesh_facewidths[i, j], LengthUnit.MM)
-
-                planet.pitch_diameter = Length(
-                    mesh_diameters[i, j] * u_e, LengthUnit.MM
-                )
-                planet.face_width = Length(mesh_facewidths[i, j], LengthUnit.MM)
-
-                ring.pitch_diameter = Length(
-                    mesh_diameters[i, j] + 2 * mesh_diameters[i, j] * u_e,
-                    LengthUnit.MM,
-                )
-                ring.face_width = Length(mesh_facewidths[i, j], LengthUnit.MM)
-
-                (
-                    sun_bending[i, j],
-                    planet_sun_bending[i, j],
-                    planet_ring_bending[i, j],
-                    ring_bending[i, j],
-                ) = Planetary.bending_safety_factor(
-                    sun=sun,
-                    planet=planet,
-                    ring=ring,
-                    operating_conditions=operating_conditions,
-                    return_all=True,
-                )
-
-                (
-                    sun_pitting[i, j],
-                    planet_sun_pitting[i, j],
-                    planet_ring_pitting[i, j],
-                    ring_pitting[i, j],
-                ) = Planetary.pitting_safety_factor(
-                    sun=sun,
-                    planet=planet,
-                    ring=ring,
-                    operating_conditions=operating_conditions,
-                    return_all=True,
-                )
-
-        import matplotlib.pyplot as plt
-
-        fig, ax = plt.subplots(
-            subplot_kw={"projection": "3d"},
-            layout="constrained",
-        )
-        for name, dataset in [
-            ("Sun Bending", sun_bending),
-            # ("Planet-Sun Bending", planet_sun_bending),
-            # ("Planet-Ring Bending", planet_ring_bending),
-            ("Ring Bending", ring_bending),
-            ("Sun Pitting", sun_pitting),
-            # ("Planet-Sun Pitting", planet_sun_pitting),
-            # ("Planet-Ring Pitting", planet_ring_pitting),
-            ("Ring Pitting", ring_pitting),
-        ]:
-            ax.plot_surface(
-                mesh_diameters,
-                mesh_facewidths,
-                dataset,
-                alpha=0.7,
-                label=name,
-            )
-
-        ax.set_xlabel("Pitch Diameter (mm)")
-        ax.set_ylabel("Face Width (mm)")
-        ax.set_zlabel("Safety Factor")
-        ax.set_zlim(1, 4)
-        ax.set_title("Planetary Gear Safety Factor Analysis")
-
-        plt.legend()
-        plt.show()
-
-    # plot()
+    return res, params
