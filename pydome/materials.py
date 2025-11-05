@@ -21,7 +21,7 @@ Steel = Material(
     H_B=250,
     grade=1,
     surface_finish=None,
-    modulus_of_elasticity=Stress(3e6, StressUnit.PSI),
+    modulus_of_elasticity=Stress(3e7, StressUnit.PSI),
     poissons_ratio=0.3
 )
 

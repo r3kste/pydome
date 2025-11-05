@@ -448,22 +448,78 @@ class Planetary(Spur):
             else:
                 return attr
 
+    def get_pitch_line_velocity(
+        *,
+        gear: Gear,
+        gear_member: Literal["sun", "planet", "ring"],
+        mate: Gear,
+        mate_member: Literal["sun", "planet", "ring"],
+        **operating_conditions: Any,
+    ) -> Velocity:
+        # Pitch Line Velocities are same
+        # So pitch line velocity of mate (sun) = pitch line velocity of gear (planet)
+        if gear_member == "sun":
+            sun_pitch_diameter = gear.get_pitch_diameter
+            sun_rpm = gear.rpm
+        elif mate_member == "sun":
+            sun_pitch_diameter = mate.get_pitch_diameter
+            sun_rpm = mate.rpm
+        else:
+            if gear_member == "planet":
+                ring_pitch_diameter = mate.get_pitch_diameter
+                planet_pitch_diameter = gear.get_pitch_diameter
+                planet_rpm_relative_to_carrier = gear.rpm
+            if gear_member == "ring":
+                ring_pitch_diameter = gear.get_pitch_diameter
+                planet_pitch_diameter = mate.get_pitch_diameter
+                planet_rpm_relative_to_carrier = mate.rpm
+
+            sun_pitch_diameter = ring_pitch_diameter - 2 * planet_pitch_diameter
+            N_S = operating_conditions["N_S"]
+            N_R = operating_conditions["N_R"]
+            N_P = operating_conditions["N_P"]
+            sun_rpm = (
+                planet_rpm_relative_to_carrier
+                * Planetary.u_e(N_P=N_P, N_S=N_S)
+                / (1 - 1 / Planetary.m_G(N_S=N_S, N_R=N_R))
+            )
+
+        V = Planetary.V(d=sun_pitch_diameter, n=sun_rpm)
+        return V
+
     def _bending_safety_factor(
         *,
         gear: Gear,
-        member_type: Literal["sun", "planet", "ring"],
-        other_gear: Gear,
+        gear_member: Literal["sun", "planet", "ring"],
+        mate: Gear,
+        mate_member: Literal["sun", "planet", "ring"],
         is_pinion: bool,
         **operating_conditions: Any,
     ) -> tuple[int, int, int, int]:
-        if is_pinion:
-            pinion, driven = gear, other_gear
-        else:
-            pinion, driven = other_gear, gear
+        """Bending safety factor calculation for a gear mesh in a planetary gear set
 
-        V = Planetary.V(d=gear.get_pitch_diameter, n=gear.rpm)
+        Args:
+            gear (Gear): The gear for which the bending safety factor is being calculated.
+            gear_member (Literal["sun", "planet", "ring"]): The member type of the gear.
+            mate (Gear): The mating gear.
+            mate_member (Literal["sun", "planet", "ring"]): The member type of the mating gear.
+            is_pinion (bool): True if the gear is the driving gear (pinion), False otherwise.
+            operating_conditions (dict): A dictionary containing the operating conditions required for the calculation.
+        """
+
+        if is_pinion:
+            pinion, driven = gear, mate
+        else:
+            pinion, driven = mate, gear
 
         H = operating_conditions["H"]
+        V = Planetary.get_pitch_line_velocity(
+            gear=gear,
+            gear_member=gear_member,
+            mate=mate,
+            mate_member=mate_member,
+            **operating_conditions,
+        )
         W_t = Planetary.W_t(H=H, V=V)
 
         N_CP = operating_conditions["N_CP"]
@@ -499,7 +555,7 @@ class Planetary(Spur):
         )
 
         K_B = Planetary.K_B(t_R=None, h_t=None)
-        J = Planetary.J(N=gear.n_teeth, other_N=other_gear.n_teeth)
+        J = Planetary.J(N=gear.n_teeth, other_N=mate.n_teeth)
 
         s_b = Planetary.s_b(
             W_t=W_t_per_mesh,
@@ -526,13 +582,10 @@ class Planetary(Spur):
             upper=True,
         )
 
-        T = operating_conditions["T"]
-        K_T = Planetary.K_T(T=T)
+        K_T = Planetary.get_value("K_T", operating_conditions)
+        K_R = Planetary.get_value("K_R", operating_conditions)
+        S_F = Planetary.get_value("S_F", operating_conditions)
 
-        R = operating_conditions["R"]
-        K_R = Planetary.K_R(R=R)
-
-        S_F = operating_conditions["S_F"]
         s_b_all = Planetary.s_b_all(
             S_t=S_t,
             Y_N=Y_N,
@@ -543,6 +596,128 @@ class Planetary(Spur):
 
         s_f_b = Planetary.s_f_b(s_b=s_b, s_b_all=s_b_all)
         return s_f_b
+
+    def _pitting_safety_factor(
+        gear: Gear,
+        gear_member: Literal["sun", "planet", "ring"],
+        mate: Gear,
+        mate_member: Literal["sun", "planet", "ring"],
+        is_pinion: bool,
+        **operating_conditions: Any,
+    ) -> float:
+        """Pitting safety factor"""
+
+        if is_pinion:
+            pinion, driven = gear, mate
+        else:
+            pinion, driven = mate, gear
+
+        C_p = Planetary.C_p(
+            mu_P=pinion.material.poissons_ratio,
+            mu_G=driven.material.poissons_ratio,
+            E_P=pinion.material.modulus_of_elasticity,
+            E_G=driven.material.modulus_of_elasticity,
+        )
+
+        H = Planetary.get_value("H", operating_conditions)
+        V = Planetary.get_pitch_line_velocity(
+            gear=gear,
+            gear_member=gear_member,
+            mate=mate,
+            mate_member=mate_member,
+            **operating_conditions,
+        )
+        W_t = Planetary.W_t(H=H, V=V)
+
+        K_gamma = Planetary.get_value("K_gamma", operating_conditions)
+        K_A = Planetary.get_value("K_A", operating_conditions)
+        N_CP = Planetary.get_value("N_CP", operating_conditions)
+        W_t_per_mesh = Planetary.W_t_per_mesh(
+            F_Nom=W_t, K_gamma=K_gamma, K_A=K_A, N_CP=N_CP
+        )
+
+        power_source = Planetary.get_value("power_source", operating_conditions)
+        driven_machine = Planetary.get_value("driven_machine", operating_conditions)
+        K_o = Planetary.K_o(power_source=power_source, driven_machine=driven_machine)
+
+        K_v = Planetary.K_v(V=V, Q_v=gear.quality_number)
+
+        Y = Planetary.Y(N=gear.n_teeth)
+        K_s = Planetary.K_s(F=gear.face_width, Y=Y, P=gear.get_diametral_pitch)
+
+        C_mc = Planetary.C_mc(is_crowned=gear.is_crowned)
+        C_pf = Planetary.C_pf(F=gear.face_width, d_P=pinion.get_pitch_diameter)
+        C_pm = Planetary.C_pm(S_1=None, S=None)
+        gearing_condition = Planetary.get_value(
+            "gearing_condition", operating_conditions
+        )
+        C_ma = Planetary.C_ma(F=gear.face_width, gearing_condition=gearing_condition)
+        C_e = Planetary.C_e(is_gear_adjusted=False)
+        K_m = Planetary.K_H_beta(
+            C_mc=C_mc,
+            C_pf=C_pf,
+            C_pm=C_pm,
+            C_ma=C_ma,
+            C_e=C_e,
+            quality_number=gear.quality_number,
+        )
+
+        C_f = Planetary.C_f()
+
+        m_G = Planetary.get_value("m_G", operating_conditions)
+        m_N = Planetary.get_value("m_N", operating_conditions)
+        phi = gear.pressure_angle
+        gear_mode = Planetary.get_value("gear_mode", operating_conditions)
+
+        I = Planetary.I(
+            m_G=m_G,
+            m_N=m_N,
+            phi=phi,
+            gear_mode=gear_mode,
+        )
+
+        s_c = Planetary.s_c(
+            C_p=C_p,
+            W_t=W_t_per_mesh,
+            K_o=K_o,
+            K_v=K_v,
+            K_s=K_s,
+            K_m=K_m,
+            C_f=C_f,
+            d_P=pinion.get_pitch_diameter,
+            F=gear.face_width,
+            I=I,
+        )
+
+        S_c = Planetary.S_c(H_B=gear.material.H_B, grade=gear.material.grade)
+
+        Z_N = Planetary.Z_N(
+            L=gear.desired_cycles, is_nitrided=gear.surface_finish == "nitrided"
+        )
+
+        C_H = Planetary.C_H(
+            m_G=m_G,
+            H_B_P=pinion.material.H_B,
+            f_P=None,
+            H_B_G=driven.material.H_B,
+            is_pinion=is_pinion,
+        )
+
+        K_T = Planetary.get_value("K_T", operating_conditions)
+        K_R = Planetary.get_value("K_R", operating_conditions)
+        S_H = Planetary.get_value("S_H", operating_conditions)
+
+        s_c_all = Planetary.s_c_all(
+            S_c=S_c,
+            Z_N=Z_N,
+            C_H=C_H,
+            K_T=K_T,
+            K_R=K_R,
+            S_H=S_H,
+        )
+
+        s_f_c = Planetary.s_f_c(s_c=s_c, s_c_all=s_c_all)
+        return s_f_c
 
     def bending_safety_factor(
         *,
@@ -555,8 +730,9 @@ class Planetary(Spur):
         """Bending safety factor"""
         s_b_f_SP = Planetary._bending_safety_factor(
             gear=sun,
-            member_type="sun",
-            other_gear=planet,
+            gear_member="sun",
+            mate=planet,
+            mate_member="planet",
             is_pinion=True,
             **operating_conditions,
             gear_mode="external",
@@ -564,8 +740,9 @@ class Planetary(Spur):
 
         s_b_f_PS = Planetary._bending_safety_factor(
             gear=planet,
-            member_type="planet",
-            other_gear=sun,
+            gear_member="planet",
+            mate=sun,
+            mate_member="sun",
             is_pinion=False,
             **operating_conditions,
             gear_mode="external",
@@ -573,17 +750,110 @@ class Planetary(Spur):
 
         s_b_f_PR = Planetary._bending_safety_factor(
             gear=planet,
-            member_type="planet",
-            other_gear=ring,
+            gear_member="planet",
+            mate=ring,
+            mate_member="ring",
             is_pinion=True,
             **operating_conditions,
             gear_mode="internal",
         )
 
+        s_b_f_RP = Planetary._bending_safety_factor(
+            gear=ring,
+            gear_member="ring",
+            mate=planet,
+            mate_member="planet",
+            is_pinion=False,
+            **operating_conditions,
+            gear_mode="internal",
+        )
+
         if return_all:
-            return s_b_f_SP, s_b_f_PS, s_b_f_PR
+            return s_b_f_SP, s_b_f_PS, s_b_f_PR, s_b_f_RP
         else:
-            return min(s_b_f_SP, s_b_f_PS, s_b_f_PR)
+            return min(s_b_f_SP, s_b_f_PS, s_b_f_PR, s_b_f_RP)
+
+    def pitting_safety_factor(
+        *,
+        sun: Gear,
+        planet: Gear,
+        ring: Gear,
+        operating_conditions: dict,
+        return_all: bool = False,
+    ) -> float:
+        """Pitting safety factor"""
+        s_c_f_SP = Planetary._pitting_safety_factor(
+            gear=sun,
+            gear_member="sun",
+            mate=planet,
+            mate_member="planet",
+            is_pinion=True,
+            **operating_conditions,
+            gear_mode="external",
+        )
+
+        s_c_f_PS = Planetary._pitting_safety_factor(
+            gear=planet,
+            gear_member="planet",
+            mate=sun,
+            mate_member="sun",
+            is_pinion=False,
+            **operating_conditions,
+            gear_mode="external",
+        )
+
+        s_c_f_PR = Planetary._pitting_safety_factor(
+            gear=planet,
+            gear_member="planet",
+            mate=ring,
+            mate_member="ring",
+            is_pinion=True,
+            **operating_conditions,
+            gear_mode="internal",
+        )
+
+        s_c_f_RP = Planetary._pitting_safety_factor(
+            gear=ring,
+            gear_member="ring",
+            mate=planet,
+            mate_member="planet",
+            is_pinion=False,
+            **operating_conditions,
+            gear_mode="internal",
+        )
+
+        if return_all:
+            return s_c_f_SP, s_c_f_PS, s_c_f_PR, s_c_f_RP
+        else:
+            return min(s_c_f_SP, s_c_f_PS, s_c_f_PR, s_c_f_RP)
+
+    def safety_factor(
+        *,
+        sun: Gear,
+        planet: Gear,
+        ring: Gear,
+        operating_conditions: dict,
+        return_all: bool = False,
+    ) -> tuple[float, float]:
+        """Bending and Pitting safety factors"""
+        s_b_f = Planetary.bending_safety_factor(
+            sun=sun,
+            planet=planet,
+            ring=ring,
+            operating_conditions=operating_conditions,
+        )
+
+        s_c_f = Planetary.pitting_safety_factor(
+            sun=sun,
+            planet=planet,
+            ring=ring,
+            operating_conditions=operating_conditions,
+        )
+
+        if return_all:
+            return float(s_b_f), float(s_c_f)
+        else:
+            return min(s_b_f, s_c_f)
 
 
 def demo():
@@ -607,7 +877,7 @@ def demo():
     N_P = round((N_R - N_S) / 2)
 
     T_Nom = kinetics.torque(P=H, n=n_S)
-    K_gamma = 1.0
+    K_gamma = 1.05
     K = Stress(1.38, StressUnit.MPA)
     C_G = Planetary.C_G(N_P=N_P, N_S=N_S)
     face_width_to_diameter_ratio = 1.2
@@ -685,6 +955,24 @@ def demo():
     )
     bounds["ring.face_width"] = (0.5 * estimated_face_width, 1.5 * estimated_face_width)
 
+    operating_conditions = dict(
+        H=Power(600, PowerUnit.WATT),
+        N_S=N_S,
+        N_R=N_R,
+        N_P=N_P,
+        N_CP=N_CP,
+        power_source="uniform",
+        driven_machine="uniform",
+        gearing_condition="enclosed_commercial",
+        T=Temperature(25, TemperatureUnit.CELSIUS),
+        R=0.9,
+        S_F=2.0,
+        S_H=1.4,
+        K_gamma=K_gamma,
+        application_level=2,
+        K_A=1,
+    )
+
     constraints = [
         om.EqualityConstraint(
             selector=lambda params: [
@@ -725,41 +1013,121 @@ def demo():
         ),
     ]
 
-    operating_conditions = dict(
-        H=Power(600, PowerUnit.WATT),
-        N_CP=N_CP,
-        power_source="uniform",
-        driven_machine="uniform",
-        gearing_condition="enclosed_commercial",
-        T=Temperature(25, TemperatureUnit.CELSIUS),
-        R=0.9,
-        S_F=1.0,
-        S_H=1.0,
-        application_level=2,
-        K_A=1,
+    # res, params = solver.solve_for_parameters(
+    #     func=Planetary.safety_factor,
+    #     target_value=1.0,
+    #     known_params={
+    #         "sun": sun,
+    #         "planet": planet,
+    #         "ring": ring,
+    #         "operating_conditions": operating_conditions,
+    #     },
+    #     unknown_params=unknowns,
+    #     bounds=bounds,
+    #     constraints=constraints,
+    # )
+
+    # for key, value in params.items():
+    #     print(f"{key}: \t{round(value.magnitude, 4)} {value.unit}")
+    # print(
+    #     Planetary.safety_factor(
+    #         sun=sun,
+    #         planet=planet,
+    #         ring=ring,
+    #         operating_conditions=operating_conditions,
+    #         return_all=True,
+    #     )
+    # )
+
+    NO = 20
+    diameters_mags = np.linspace(15, 25, NO)
+    facewidths_mags = np.linspace(15, 25, NO)
+
+    mesh_diameters, mesh_facewidths = np.meshgrid(
+        diameters_mags,
+        facewidths_mags,
     )
 
-    res, params = solver.solve_for_parameters(
-        func=Planetary.bending_safety_factor,
-        target_value=2.0,
-        known_params={
-            "sun": sun,
-            "planet": planet,
-            "ring": ring,
-            "operating_conditions": operating_conditions,
-        },
-        unknown_params=unknowns,
-        bounds=bounds,
-        constraints=constraints,
-    )
+    # safety_factors = np.zeros(mesh_diameters.shape)
+    sun_bending = np.zeros(mesh_diameters.shape)
+    planet_sun_bending = np.zeros(mesh_diameters.shape)
+    planet_ring_bending = np.zeros(mesh_diameters.shape)
+    ring_bending = np.zeros(mesh_diameters.shape)
 
-    print("Optimization Result:", params)
-    print(
-        Planetary.bending_safety_factor(
-            sun=sun,
-            planet=planet,
-            ring=ring,
-            operating_conditions=operating_conditions,
-            return_all=True,
+    sun_pitting = np.zeros(mesh_diameters.shape)
+    planet_sun_pitting = np.zeros(mesh_diameters.shape)
+    planet_ring_pitting = np.zeros(mesh_diameters.shape)
+    ring_pitting = np.zeros(mesh_diameters.shape)
+
+    for i in range(mesh_diameters.shape[0]):
+        for j in range(mesh_diameters.shape[1]):
+            sun.pitch_diameter = Length(mesh_diameters[i, j], LengthUnit.MM)
+            sun.face_width = Length(mesh_facewidths[i, j], LengthUnit.MM)
+
+            planet.pitch_diameter = Length(mesh_diameters[i, j] * u_e, LengthUnit.MM)
+            planet.face_width = Length(mesh_facewidths[i, j], LengthUnit.MM)
+
+            ring.pitch_diameter = Length(
+                mesh_diameters[i, j] + 2 * mesh_diameters[i, j] * u_e,
+                LengthUnit.MM,
+            )
+            ring.face_width = Length(mesh_facewidths[i, j], LengthUnit.MM)
+
+            (
+                sun_bending[i, j],
+                planet_sun_bending[i, j],
+                planet_ring_bending[i, j],
+                ring_bending[i, j],
+            ) = Planetary.bending_safety_factor(
+                sun=sun,
+                planet=planet,
+                ring=ring,
+                operating_conditions=operating_conditions,
+                return_all=True,
+            )
+
+            (
+                sun_pitting[i, j],
+                planet_sun_pitting[i, j],
+                planet_ring_pitting[i, j],
+                ring_pitting[i, j],
+            ) = Planetary.pitting_safety_factor(
+                sun=sun,
+                planet=planet,
+                ring=ring,
+                operating_conditions=operating_conditions,
+                return_all=True,
+            )
+
+    import matplotlib.pyplot as plt
+
+    fig, ax = plt.subplots(
+        subplot_kw={"projection": "3d"},
+        layout="constrained",
+    )
+    for name, dataset in [
+        ("Sun Bending", sun_bending),
+        # ("Planet-Sun Bending", planet_sun_bending),
+        # ("Planet-Ring Bending", planet_ring_bending),
+        ("Ring Bending", ring_bending),
+        ("Sun Pitting", sun_pitting),
+        # ("Planet-Sun Pitting", planet_sun_pitting),
+        # ("Planet-Ring Pitting", planet_ring_pitting),
+        ("Ring Pitting", ring_pitting),
+    ]:
+        ax.plot_surface(
+            mesh_diameters,
+            mesh_facewidths,
+            dataset,
+            alpha=0.7,
+            label=name,
         )
-    )
+
+    ax.set_xlabel("Pitch Diameter (mm)")
+    ax.set_ylabel("Face Width (mm)")
+    ax.set_zlabel("Safety Factor")
+    ax.set_zlim(1, 4)
+    ax.set_title("Planetary Gear Safety Factor Analysis")
+
+    plt.legend()
+    plt.show()
