@@ -20,26 +20,32 @@ class Bevel(Spur):
         """
         d_P_mag = d_P.to(LengthUnit.INCH).magnitude
         d_G_mag = d_G.to(LengthUnit.INCH).magnitude
-        shaft_angle_rad = shaft_angle.to(AngleUnit.DEGREE).magnitude * pi / 180
 
-        A_0_mag = (d_P_mag + d_G_mag) / (2 * sin(shaft_angle_rad / 2))
+        gamma, _ = Bevel.pitch_angle(
+            N_p=1, N_g=d_G_mag / d_P_mag, shaft_angle=shaft_angle
+        )
+
+        A_0_mag = d_P_mag / (2 * sin(gamma.to(AngleUnit.RADIAN).magnitude))
         return Length(A_0_mag, LengthUnit.INCH)
 
-    def pitch_angle(*, N_p: int, N_g: int, shaft_angle_deg: float = 90) -> tuple:
+    def pitch_angle(*, N_p: int, N_g: int, shaft_angle: Angle) -> tuple[Angle, Angle]:
         """
-        Cone angles (pitch angles) for pinion and gear (Eq. 15-24).
+        Cone angles (pitch angles) for pinion and gear
 
         Args:
             N_p: Pinion teeth
             N_g: Gear teeth
-            shaft_angle_deg: Shaft angle
+            shaft_angle: Shaft angle
         """
-        shaft_angle_rad = shaft_angle_deg * pi / 180
-        gamma_p = atan(N_p / N_g * tan(shaft_angle_rad / 2))
-        gamma_g = atan(N_g / N_p * tan(shaft_angle_rad / 2))
-        return gamma_p, gamma_g
+        shaft_angle_mag = shaft_angle.to(AngleUnit.RADIAN).magnitude
+        gamma_p_mag = atan(N_p / N_g * tan(shaft_angle_mag / 2))
+        gamma_g_mag = atan(N_g / N_p * tan(shaft_angle_mag / 2))
+        return (
+            Angle(gamma_p_mag, AngleUnit.RADIAN),
+            Angle(gamma_g_mag, AngleUnit.RADIAN),
+        )
 
-    def face_width_max(A_0: float, P: float) -> float:
+    def face_width_max(A_0: Length, P: InverseLength) -> Length:
         """
         Maximum recommended face width
 
@@ -47,7 +53,9 @@ class Bevel(Spur):
             A_0: Outer cone distance
             P: Outer transverse diametral pitch
         """
-        return min(0.3 * A_0, 10 / P)
+        A_0_mag = A_0.to(LengthUnit.INCH).magnitude
+        P_mag = P.to(InverseLengthUnit.PER_INCH).magnitude
+        return Length(min(0.3 * A_0_mag, 10 / P_mag), LengthUnit.INCH)
 
     def K_o(
         *,
@@ -338,31 +346,22 @@ class Bevel(Spur):
             I_interp = Bevel._values_I[idx[0]]
         return float(I_interp)
 
-    def S_t(*, H_B: float, grade: int, is_through_hardened: bool) -> Stress:
-        """
-        Bending strength number S_t for steel gears
-
-        Args:
-            H_B: Brinell Hardness Number
-            grade: Gear quality grade (1 or 2)
-            is_through_hardened: True for through-hardened, False for case-hardened
-        """
-        if is_through_hardened:
-            if grade == 1:
-                m, c = 44, 2100
-            elif grade == 2:
-                m, c = 48, 5980
-            return Stress((m * H_B + c), StressUnit.PSI)
-        else:
-            return Stress(22000, StressUnit.PSI)
-
-    def S_c(*, H_B: float, grade: int, is_through_hardened: bool) -> Stress:
+    def S_c(
+        *,
+        H_B: float | None,
+        grade: int,
+        is_through_hardened: bool,
+        is_case_hardened: bool,
+    ) -> Stress:
         """
         Contact strength number S_c for steel gears
 
         Args:
             H_B: Brinell Hardness Number
-            grade: Gear quality grade (1 or 2)
+            grade: Gear quality grade
+            is_through_hardened: True for through-hardened,
+            is_case_hardened: True for case-hardened,
+            If both false, assumes nitrided steel
         """
         if is_through_hardened:
             if grade == 1:
@@ -370,8 +369,48 @@ class Bevel(Spur):
             elif grade == 2:
                 m, c = 263.6, 29560
             return Stress((m * H_B + c), StressUnit.PSI)
+        elif is_case_hardened:
+            if grade == 1:
+                return Stress(200000, StressUnit.PSI)
+            elif grade == 2:
+                return Stress(225000, StressUnit.PSI)
+            elif grade == 3:
+                return Stress(250000, StressUnit.PSI)
         else:
             return Stress(145000, StressUnit.PSI)
+
+    def S_t(
+        *,
+        H_B: float | None,
+        grade: int,
+        is_through_hardened: bool,
+        is_case_hardened: bool,
+    ) -> Stress:
+        """
+        Bending strength number S_t for steel gears
+
+        Args:
+            H_B: Brinell Hardness Number
+            grade: Gear quality grade
+            is_through_hardened: True for through-hardened,
+            is_case_hardened: True for case-hardened,
+            If both false, assumes nitrided steel
+        """
+        if is_through_hardened:
+            if grade == 1:
+                m, c = 44, 2100
+            elif grade == 2:
+                m, c = 48, 5980
+            return Stress((m * H_B + c), StressUnit.PSI)
+        elif is_case_hardened:
+            if grade == 1:
+                return Stress(30000, StressUnit.PSI)
+            elif grade == 2:
+                return Stress(35000, StressUnit.PSI)
+            elif grade == 3:
+                return Stress(40000, StressUnit.PSI)
+        else:
+            return Stress(22000, StressUnit.PSI)
 
     def s_t(
         *,
@@ -481,34 +520,6 @@ class Bevel(Spur):
 
         s_c_allowable_mag = (S_c_mag * C_L * C_H) / (S_H * K_T * C_R)
         return Stress(s_c_allowable_mag, StressUnit.PSI)
-
-    def safety_factor_bending(*, s_t_allowable: Stress, s_t: Stress) -> float:
-        """
-        Safety factor for bending S_F
-
-        Args:
-            s_t_allowable: Allowable bending stress
-            s_t: Bending stress
-        """
-
-        s_t_allowable_mag = s_t_allowable.to(StressUnit.PSI).magnitude
-        s_t_mag = s_t.to(StressUnit.PSI).magnitude
-
-        return s_t_allowable_mag / s_t_mag
-
-    def safety_factor_pitting(*, s_c_allowable: Stress, s_c: Stress) -> float:
-        """
-        Safety factor for pitting S_H
-
-        Args:
-            s_c_allowable: Allowable contact stress
-            s_c: Contact stress
-        """
-
-        s_c_allowable_mag = s_c_allowable.to(StressUnit.PSI).magnitude
-        s_c_mag = s_c.to(StressUnit.PSI).magnitude
-
-        return s_c_allowable_mag / s_c_mag
 
 
 '''
