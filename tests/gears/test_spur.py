@@ -116,30 +116,28 @@ def test_example_14_4():
     assert C_p.magnitude == approx(2300)
 
     S_t_P = Spur.S_t(
+        heat_treatment="through",
         H_B=H_B_P,
         grade=grade_P,
-        is_through_hardened=is_through_hardened_P,
-        is_nitrided=is_nitrided_P,
-        material=None,
+        designation="steel",
     )
     assert S_t_P.unit == StressUnit.PSI
     assert S_t_P.magnitude == approx(31350)
 
-    _S_t_G = Spur.S_t(
+    S_t_G = Spur.S_t(
+        heat_treatment="through",
         H_B=H_B_G,
         grade=grade_G,
-        is_through_hardened=is_through_hardened_G,
-        is_nitrided=is_nitrided_G,
-        material=None,
+        designation="steel",
     )
-    assert _S_t_G.unit == StressUnit.PSI
-    assert _S_t_G.magnitude == approx(28260)
+    assert S_t_G.unit == StressUnit.PSI
+    assert S_t_G.magnitude == approx(28260)
 
-    S_c_P = Spur.S_c(H_B=H_B_P, grade=grade_P)
+    S_c_P = Spur.S_c(heat_treatment="through", H_B=H_B_P, grade=grade_P)
     assert S_c_P.unit == StressUnit.PSI
     assert S_c_P.magnitude == approx(106400)
 
-    S_c_G = Spur.S_c(H_B=H_B_G, grade=grade_G)
+    S_c_G = Spur.S_c(heat_treatment="through", H_B=H_B_G, grade=grade_G)
     assert S_c_G.unit == StressUnit.PSI
     assert S_c_G.magnitude == approx(93500)
 
@@ -178,7 +176,7 @@ def test_example_14_4():
     assert s_b_G.unit == StressUnit.PSI
     assert s_b_G.magnitude == approx(4854)
 
-    s_b_allowable_G = Spur.s_b_all(S_t=_S_t_G, Y_N=Y_N_G, K_R=K_R, K_T=K_T, S_F=1.0)
+    s_b_allowable_G = Spur.s_b_all(S_t=S_t_G, Y_N=Y_N_G, K_R=K_R, K_T=K_T, S_F=1.0)
     assert s_b_allowable_G.unit == StressUnit.PSI
     assert s_b_allowable_G.magnitude == approx(33114)
 
@@ -242,11 +240,10 @@ def test_example_14_6():
     through_hardened_G = True
 
     S_t_P = Spur.S_t(
+        heat_treatment="through",
         H_B=H_B_P,
         grade=grade_P,
-        is_through_hardened=through_hardened_P,
-        is_nitrided=False,
-        material=None,
+        designation="steel",
     )
     assert S_t_P.unit == StressUnit.PSI
     assert S_t_P.magnitude == approx(35990)
@@ -263,11 +260,10 @@ def test_example_14_6():
 
     H_B_G = 150  # rev
     S_t_G = Spur.S_t(
+        heat_treatment="through",
         H_B=H_B_G,
         grade=grade_G,
-        is_through_hardened=through_hardened_G,
-        is_nitrided=False,
-        material=None,
+        designation="steel",
     )
     assert S_t_G.unit == StressUnit.PSI
     assert S_t_G.magnitude == approx(24430, rel=0.01)

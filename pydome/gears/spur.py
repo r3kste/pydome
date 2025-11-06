@@ -614,20 +614,20 @@ class Spur:
 
     def S_t(
         *,
-        H_B: float,
+        heat_treatment: Literal[
+            "through", "induction_A", "induction_B", "flame", "carburized", "nitrided"
+        ],
         grade: int,
-        is_through_hardened: bool,
-        is_nitrided: bool,
-        material: Literal["chrome", "nitralloy"],
+        H_B: float | None,
+        designation: Literal["steel", "chrome", "nitralloy"],
     ) -> Stress:
         """Gear Bending Strength
 
         Args:
-            H_B (float): Brinell Hardness Number
+            heat_treatment (Literal): Type of heat treatment
             grade (int): Gear quality grade
-            is_through_hardened (bool): True if through-hardened, False otherwise
-            is_nitrided (bool): True if nitrided, False otherwise
-            material (Literal["chrome", "nitralloy"]): Material type if nitrided
+            H_B (float | None): Brinell Hardness Number
+            material (Literal): Material type
 
         Assumptions:
             - 10 million stress cycles
@@ -636,29 +636,50 @@ class Spur:
 
         """
 
-        if is_through_hardened and is_nitrided:
-            if grade == 1:
-                m, c = 82.3, 12150
-            elif grade == 2:
-                m, c = 108.6, 15890
-        elif is_through_hardened:
-            if grade == 1:
-                m, c = 77.3, 12800
-            elif grade == 2:
-                m, c = 102, 16400
-        elif is_nitrided:
-            if material == "chrome":
+        if designation == "steel":
+            if heat_treatment == "through":
+                if grade == 1:
+                    m, c = 77.3, 12800
+                elif grade == 2:
+                    m, c = 102, 16400
+            elif heat_treatment == "induction":
+                if grade == 1:
+                    m, c = 0, 45e3
+                elif grade == 2:
+                    m, c = 0, 55e3
+            elif heat_treatment == "flame":
+                if grade == 1:
+                    m, c = 0, 22e3
+                elif grade == 2:
+                    m, c = 0, 22e3
+            elif heat_treatment == "carburized":
+                if grade == 1:
+                    m, c = 0, 55e3
+                elif grade == 2:
+                    m, c = 0, 65e3
+                elif grade == 3:
+                    m, c = 0, 75e3
+            elif heat_treatment == "nitrided":
+                if grade == 1:
+                    m, c = 82.3, 12150
+                elif grade == 2:
+                    m, c = 108.6, 15890
+        elif designation == "chrome":
+            if heat_treatment == "nitrided":
                 if grade == 1:
                     m, c = 105.2, 9280
                 elif grade == 2:
                     m, c = 105.2, 22280
                 elif grade == 3:
                     m, c = 105.2, 29280
-            elif material == "nitralloy":
-                if grade == 1:
-                    m, c = 86.2, 12730
-                elif grade == 2:
-                    m, c = 113.8, 16650
+        elif designation == "nitralloy":
+            if grade == 1:
+                m, c = 86.2, 12730
+            elif grade == 2:
+                m, c = 113.8, 16650
+
+        if m == 0:
+            return Stress(c, StressUnit.PSI)
 
         return Stress(m * H_B + c, StressUnit.PSI)
 
@@ -724,28 +745,53 @@ class Spur:
 
     def S_c(
         *,
+        heat_treatment: Literal["through", "induction", "carburized", "nitrided"],
         H_B: float,
         grade: int,
     ) -> Stress:
         """Gear Contact Strength
 
         Args:
+            heat_treatment (Literal): Type of heat treatment
             H_B (float): Brinell Hardness Number
             grade (int): Gear quality grade
 
         Assumptions:
             - 10 million stress cycles
             - 99% reliability
+            - Steel
 
         Source:
             ANSI/AGMA 2001-D04 and 2101-D04
         """
 
-        if grade == 1:
-            m, c = 322, 29100
-        elif grade == 2:
-            m, c = 349, 34300
+        if heat_treatment == "through":
+            if grade == 1:
+                m, c = 322, 29100
+            elif grade == 2:
+                m, c = 349, 34300
+        elif heat_treatment == "induction":
+            if grade == 1:
+                m, c = 0, 170e3
+            elif grade == 2:
+                m, c = 0, 190e3
+        elif heat_treatment == "carburized":
+            if grade == 1:
+                m, c = 0, 180e3
+            elif grade == 2:
+                m, c = 0, 225e3
+            elif grade == 3:
+                m, c = 0, 275e3
+        elif heat_treatment == "nitrided":
+            if grade == 1:
+                m, c = 0, 150e3
+            elif grade == 2:
+                m, c = 0, 160e3
+            elif grade == 3:
+                m, c = 0, 175e3
 
+        if m == 0:
+            return Stress(c, StressUnit.PSI)
         return Stress(m * H_B + c, StressUnit.PSI)
 
     def s_c_all(
@@ -849,11 +895,10 @@ class Spur:
         )
 
         S_t = Spur.S_t(
+            heat_treatment=gear.heat_treatment,
+            grade=gear.grade,
             H_B=gear.material.H_B,
-            grade=gear.material.grade,
-            is_through_hardened=gear.is_through_hardened,
-            is_nitrided=True if gear.surface_finish == "nitrided" else False,
-            material=None,
+            designation=gear.material.designation,
         )
         Y_N = Spur.Y_N(
             L=gear.desired_cycles,
@@ -946,10 +991,14 @@ class Spur:
             I=I,
         )
 
-        S_c = Spur.S_c(H_B=gear.material.H_B, grade=gear.material.grade)
+        S_c = Spur.S_c(
+            heat_treatment=gear.heat_treatment,
+            H_B=gear.material.H_B,
+            grade=gear.grade,
+        )
         Z_N = Spur.Z_N(
             L=gear.desired_cycles,
-            is_nitrided=True if gear.surface_finish == "nitrided" else False,
+            is_nitrided=(gear.heat_treatment == "nitrided"),
         )
         C_H = Spur.C_H(
             m_G=m_G,
@@ -970,81 +1019,3 @@ class Spur:
 
         s_f_c = Spur.s_f_c(s_c=s_c, s_c_all=s_c_all)
         return s_f_c
-
-
-def report(pinion: Gear, driven: Gear, operating_conditions: dict):
-    pinion_bending_sf = Spur.bending_safety_factor(
-        gear=pinion,
-        other_gear=driven,
-        operating_conditions=operating_conditions,
-        is_pinion=True,
-    )
-    print(f"Pinion Bending Safety Factor: {pinion_bending_sf:.2f}")
-
-    gear_bending_sf = Spur.bending_safety_factor(
-        gear=driven,
-        other_gear=pinion,
-        operating_conditions=operating_conditions,
-        is_pinion=False,
-    )
-    print(f"Gear Bending Safety Factor: {gear_bending_sf:.2f}")
-
-    pinion_contact_sf = Spur.contact_safety_factor(
-        gear=pinion,
-        other_gear=driven,
-        operating_conditions=operating_conditions,
-        is_pinion=True,
-    )
-    print(f"Pinion Contact Safety Factor: {pinion_contact_sf:.2f}")
-
-    gear_contact_sf = Spur.contact_safety_factor(
-        gear=driven,
-        other_gear=pinion,
-        operating_conditions=operating_conditions,
-        is_pinion=False,
-    )
-    print(f"Gear Contact Safety Factor: {gear_contact_sf:.2f}")
-
-
-def demo():
-    from pydome.materials import Steel
-
-    pinion = Gear(
-        n_teeth=20,
-        rpm=AngularVelocity(1200, AngularVelocityUnit.RPM),
-        diametral_pitch=InverseLength(1, InverseLengthUnit.PER_MM),
-        face_width=Length(2, LengthUnit.INCH),
-        desired_cycles=1e8,
-        material=Steel,
-        quality_number=6,
-        is_crowned=False,
-        is_through_hardened=True,
-        pressure_angle=Angle(20, AngleUnit.DEGREE),
-    )
-
-    gear = Gear(
-        n_teeth=40,
-        rpm=AngularVelocity(600, AngularVelocityUnit.RPM),
-        diametral_pitch=InverseLength(1, InverseLengthUnit.PER_MM),
-        face_width=Length(2, LengthUnit.INCH),
-        desired_cycles=5e7,
-        material=Steel,
-        quality_number=6,
-        is_crowned=False,
-        is_through_hardened=True,
-        pressure_angle=Angle(20, AngleUnit.DEGREE),
-    )
-
-    operating_conditions = dict(
-        H=Power(600, PowerUnit.WATT),
-        power_source="uniform",
-        driven_machine="moderate_shock",
-        gearing_condition="enclosed_commercial",
-        T=Temperature(30, TemperatureUnit.CELSIUS),
-        R=0.99,
-        S_F=1.0,
-        S_H=1.0,
-        gear_mode="external",
-    )
-
-    report(pinion, gear, operating_conditions=operating_conditions)

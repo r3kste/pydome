@@ -24,23 +24,15 @@ class Gear:
     material: Material
     quality_number: int
     is_crowned: bool
-    is_through_hardened: bool
     pressure_angle: Angle
+
+    grade: int
+    heat_treatment: str
 
     @property
     def H_B(self) -> float:
         """Brinell Hardness Number (BHN) of the gear material."""
         return self.material.H_B
-
-    @property
-    def grade(self) -> int:
-        """AGMA quality grade of the gear material."""
-        return self.material.grade
-
-    @property
-    def surface_finish(self) -> str:
-        """Surface finish type of the gear material."""
-        return self.material.surface_finish
 
     @property
     def get_pitch_diameter(self) -> Length:
@@ -63,4 +55,3 @@ class Gear:
         pitch_diameter_mag = self.pitch_diameter.magnitude
         diametral_pitch_mag = self.n_teeth / pitch_diameter_mag
         return InverseLength(diametral_pitch_mag, InverseLengthUnit.PER_INCH)
-    

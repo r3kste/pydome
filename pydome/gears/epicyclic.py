@@ -5,6 +5,7 @@ import optimagic as om
 
 from pydome import kinetics, solver
 from pydome.constants import pi
+from pydome.materials import Material
 from pydome.elements import Gear
 from pydome.gears.spur import Spur
 from pydome.units import *  # noqa: F403
@@ -173,9 +174,7 @@ class Planetary(Spur):
         """
         if any(param is None for param in [T_Branch, T_Nom, N_CP]):
             if application_level is None:
-                raise ValueError(
-                    "Either provide (T_Branch, T_Nom, N_CP) or application_level."
-                )
+                pass
 
             # TODO: this is for N_CP = 3 only
             return 1.05
@@ -430,24 +429,6 @@ class Planetary(Spur):
         F_clamp_mag = (2 * T_R_mag) / (d_bc_mag * mu)
         return Force(F_clamp_mag, ForceUnit.NEWTON)
 
-    def get_value(attr_name: str, operating_conditions: dict) -> Any:
-        if attr_name in operating_conditions:
-            return operating_conditions[attr_name]
-        else:
-            attr = getattr(Planetary, attr_name, None)
-
-            if callable(attr):
-                import inspect
-
-                sig = inspect.signature(attr)
-
-                params = {}
-                for arg in sig.parameters.keys():
-                    params[arg] = operating_conditions.get(arg)
-                return attr(**params)
-            else:
-                return attr
-
     def get_pitch_line_velocity(
         *,
         gear: Gear,
@@ -523,8 +504,8 @@ class Planetary(Spur):
         W_t = Planetary.W_t(H=H, V=V)
 
         N_CP = operating_conditions["N_CP"]
-        K_gamma = Planetary.get_value("K_gamma", operating_conditions)
-        K_A = Planetary.get_value("K_A", operating_conditions)
+        K_gamma = get_value("K_gamma", operating_conditions)
+        K_A = get_value("K_A", operating_conditions)
 
         W_t_per_mesh = Planetary.W_t_per_mesh(
             F_Nom=W_t, K_gamma=K_gamma, K_A=K_A, N_CP=N_CP
@@ -570,11 +551,10 @@ class Planetary(Spur):
         )
 
         S_t = Planetary.S_t(
+            heat_treatment=gear.heat_treatment,
+            grade=gear.grade,
             H_B=gear.material.H_B,
-            grade=gear.material.grade,
-            is_through_hardened=gear.is_through_hardened,
-            is_nitrided=True if gear.surface_finish == "nitrided" else False,
-            material=None,
+            designation=gear.material.designation,
         )
         Y_N = Planetary.Y_N(
             L=gear.desired_cycles,
@@ -582,9 +562,9 @@ class Planetary(Spur):
             upper=True,
         )
 
-        K_T = Planetary.get_value("K_T", operating_conditions)
-        K_R = Planetary.get_value("K_R", operating_conditions)
-        S_F = Planetary.get_value("S_F", operating_conditions)
+        K_T = get_value("K_T", operating_conditions)
+        K_R = get_value("K_R", operating_conditions)
+        S_F = get_value("S_F", operating_conditions)
 
         s_b_all = Planetary.s_b_all(
             S_t=S_t,
@@ -619,7 +599,7 @@ class Planetary(Spur):
             E_G=driven.material.modulus_of_elasticity,
         )
 
-        H = Planetary.get_value("H", operating_conditions)
+        H = get_value("H", operating_conditions)
         V = Planetary.get_pitch_line_velocity(
             gear=gear,
             gear_member=gear_member,
@@ -629,15 +609,15 @@ class Planetary(Spur):
         )
         W_t = Planetary.W_t(H=H, V=V)
 
-        K_gamma = Planetary.get_value("K_gamma", operating_conditions)
-        K_A = Planetary.get_value("K_A", operating_conditions)
-        N_CP = Planetary.get_value("N_CP", operating_conditions)
+        K_gamma = get_value("K_gamma", operating_conditions)
+        K_A = get_value("K_A", operating_conditions)
+        N_CP = get_value("N_CP", operating_conditions)
         W_t_per_mesh = Planetary.W_t_per_mesh(
             F_Nom=W_t, K_gamma=K_gamma, K_A=K_A, N_CP=N_CP
         )
 
-        power_source = Planetary.get_value("power_source", operating_conditions)
-        driven_machine = Planetary.get_value("driven_machine", operating_conditions)
+        power_source = get_value("power_source", operating_conditions)
+        driven_machine = get_value("driven_machine", operating_conditions)
         K_o = Planetary.K_o(power_source=power_source, driven_machine=driven_machine)
 
         K_v = Planetary.K_v(V=V, Q_v=gear.quality_number)
@@ -648,9 +628,7 @@ class Planetary(Spur):
         C_mc = Planetary.C_mc(is_crowned=gear.is_crowned)
         C_pf = Planetary.C_pf(F=gear.face_width, d_P=pinion.get_pitch_diameter)
         C_pm = Planetary.C_pm(S_1=None, S=None)
-        gearing_condition = Planetary.get_value(
-            "gearing_condition", operating_conditions
-        )
+        gearing_condition = get_value("gearing_condition", operating_conditions)
         C_ma = Planetary.C_ma(F=gear.face_width, gearing_condition=gearing_condition)
         C_e = Planetary.C_e(is_gear_adjusted=False)
         K_m = Planetary.K_H_beta(
@@ -664,10 +642,10 @@ class Planetary(Spur):
 
         C_f = Planetary.C_f()
 
-        m_G = Planetary.get_value("m_G", operating_conditions)
-        m_N = Planetary.get_value("m_N", operating_conditions)
+        m_G = get_value("m_G", operating_conditions)
+        m_N = get_value("m_N", operating_conditions)
         phi = gear.pressure_angle
-        gear_mode = Planetary.get_value("gear_mode", operating_conditions)
+        gear_mode = get_value("gear_mode", operating_conditions)
 
         I = Planetary.I(
             m_G=m_G,
@@ -689,10 +667,14 @@ class Planetary(Spur):
             I=I,
         )
 
-        S_c = Planetary.S_c(H_B=gear.material.H_B, grade=gear.material.grade)
+        S_c = Planetary.S_c(
+            heat_treatment=gear.heat_treatment,
+            H_B=gear.material.H_B,
+            grade=gear.grade,
+        )
 
         Z_N = Planetary.Z_N(
-            L=gear.desired_cycles, is_nitrided=gear.surface_finish == "nitrided"
+            L=gear.desired_cycles, is_nitrided=gear.heat_treatment == "nitrided"
         )
 
         C_H = Planetary.C_H(
@@ -703,9 +685,9 @@ class Planetary(Spur):
             is_pinion=is_pinion,
         )
 
-        K_T = Planetary.get_value("K_T", operating_conditions)
-        K_R = Planetary.get_value("K_R", operating_conditions)
-        S_H = Planetary.get_value("S_H", operating_conditions)
+        K_T = get_value("K_T", operating_conditions)
+        K_R = get_value("K_R", operating_conditions)
+        S_H = get_value("S_H", operating_conditions)
 
         s_c_all = Planetary.s_c_all(
             S_c=S_c,
@@ -841,6 +823,7 @@ class Planetary(Spur):
             planet=planet,
             ring=ring,
             operating_conditions=operating_conditions,
+            return_all=return_all,
         )
 
         s_c_f = Planetary.pitting_safety_factor(
@@ -848,24 +831,63 @@ class Planetary(Spur):
             planet=planet,
             ring=ring,
             operating_conditions=operating_conditions,
+            return_all=return_all,
         )
 
         if return_all:
-            return float(s_b_f), float(s_c_f)
+            return {
+                "Bending Sun - Planet Mesh": s_b_f[0],
+                "Bending Planet - Sun Mesh": s_b_f[1],
+                "Bending Planet - Ring Mesh": s_b_f[2],
+                "Bending Ring - Planet Mesh": s_b_f[3],
+                "Pitting Sun - Planet Mesh": s_c_f[0],
+                "Pitting Planet - Sun Mesh": s_c_f[1],
+                "Pitting Planet - Ring Mesh": s_c_f[2],
+                "Pitting Ring - Planet Mesh": s_c_f[3],
+            }
         else:
             return min(s_b_f, s_c_f)
 
 
-def demo(**inputs):
+def get_value(
+    attr_name: str,
+    operating_conditions: dict,
+    default: Any | None = None,
+    max_depth: int = 3,
+) -> Any:
+    if attr_name in operating_conditions:
+        return operating_conditions[attr_name]
+    else:
+        attr = getattr(Planetary, attr_name, default)
+
+        if callable(attr):
+            import inspect
+
+            sig = inspect.signature(attr)
+
+            params = {}
+            for arg in sig.parameters.keys():
+                params[arg] = get_value(
+                    attr_name=arg,
+                    operating_conditions=operating_conditions,
+                    default=None,
+                    max_depth=max_depth - 1,
+                )
+            return attr(**params)
+        else:
+            return attr
+
+
+def demo(optimize: bool = True, **inputs):
     from pydome.materials import Steel
 
-    n_S = inputs.get("n_S", AngularVelocity(900, AngularVelocityUnit.RPM))
-    n_C = inputs.get("n_C", AngularVelocity(225, AngularVelocityUnit.RPM))
+    n_S = get_value("n_S", inputs, AngularVelocity(900, AngularVelocityUnit.RPM))
+    n_C = get_value("n_C", inputs, AngularVelocity(225, AngularVelocityUnit.RPM))
     m_G = n_S / n_C
-    H = inputs.get("H", Power(600, PowerUnit.WATT))
-    N_CP = inputs.get("N_CP", 3)
+    H = get_value("H", inputs, Power(600, PowerUnit.WATT))
+    N_CP = get_value("N_CP", inputs, 3)
 
-    N_S = inputs.get("N_S", 24)
+    N_S = get_value("N_S", inputs, 24)
     res, params = solver.solve_for_parameters(
         func=Planetary.m_G,
         target_value=m_G,
@@ -877,10 +899,12 @@ def demo(**inputs):
     N_P = round((N_R - N_S) / 2)
 
     T_Nom = kinetics.torque(P=H, n=n_S)
-    K_gamma = inputs.get("K_gamma", 1.05)
-    K = inputs.get("K", Stress(1.38, StressUnit.MPA))
+    K_gamma = get_value("K_gamma", inputs, 1.05)
+    K = get_value("K", inputs, Stress(1.38, StressUnit.MPA))
     C_G = Planetary.C_G(N_P=N_P, N_S=N_S)
-    face_width_to_diameter_ratio = inputs.get("face_width_to_diameter_ratio", 1.2)
+    face_width_to_diameter_ratio = get_value(
+        "face_width_to_diameter_ratio", inputs, 1.2
+    )
     esimated_d_S = Planetary.estimate_d_wS(
         T_Nom=T_Nom,
         K_gamma=K_gamma,
@@ -900,14 +924,15 @@ def demo(**inputs):
     sun = Gear(
         n_teeth=N_S,
         rpm=n_S,
-        pitch_diameter=solver.UNKNOWN,
-        face_width=solver.UNKNOWN,
-        desired_cycles=inputs.get("desired_cycles", 1e10),
+        pitch_diameter=get_value("sun.pitch_diameter", inputs, solver.UNKNOWN),
+        face_width=get_value("sun.face_width", inputs, solver.UNKNOWN),
+        desired_cycles=get_value("desired_cycles", inputs, 1e10),
         material=Steel,
-        quality_number=inputs.get("quality_number", 6),
-        is_crowned=inputs.get("is_crowned", False),
-        is_through_hardened=inputs.get("is_through_hardened", True),
-        pressure_angle=inputs.get("pressure_angle", Angle(20, AngleUnit.DEGREE)),
+        quality_number=get_value("quality_number", inputs, 6),
+        is_crowned=get_value("is_crowned", inputs, False),
+        pressure_angle=get_value("pressure_angle", inputs, Angle(20, AngleUnit.DEGREE)),
+        heat_treatment=get_value("sun_heat_treatment", inputs, "through"),
+        grade=get_value("sun_grade", inputs, 1),
     )
     unknowns["sun.pitch_diameter"] = Length
     unknowns["sun.face_width"] = Length
@@ -918,14 +943,15 @@ def demo(**inputs):
     planet = Gear(
         n_teeth=N_P,
         rpm=Planetary.n_P_C(N_S=N_S, N_R=N_R, N_P=N_P, n_S_C=n_S_C, n_R_C=None),
-        pitch_diameter=solver.UNKNOWN,
-        face_width=solver.UNKNOWN,
-        desired_cycles=inputs.get("desired_cycles", 1e10),
+        pitch_diameter=get_value("planet.pitch_diameter", inputs, solver.UNKNOWN),
+        face_width=get_value("planet.face_width", inputs, solver.UNKNOWN),
+        desired_cycles=get_value("desired_cycles", inputs, 1e10),
         material=Steel,
-        quality_number=inputs.get("quality_number", 6),
-        is_crowned=inputs.get("is_crowned", False),
-        is_through_hardened=inputs.get("is_through_hardened", True),
-        pressure_angle=inputs.get("pressure_angle", Angle(20, AngleUnit.DEGREE)),
+        quality_number=get_value("quality_number", inputs, 6),
+        is_crowned=get_value("is_crowned", inputs, False),
+        pressure_angle=get_value("pressure_angle", inputs, Angle(20, AngleUnit.DEGREE)),
+        heat_treatment=get_value("planet_heat_treatment", inputs, "through"),
+        grade=get_value("planet_grade", inputs, 1),
     )
     unknowns["planet.pitch_diameter"] = Length
     unknowns["planet.face_width"] = Length
@@ -938,14 +964,15 @@ def demo(**inputs):
     ring = Gear(
         n_teeth=N_R,
         rpm=AngularVelocity(0, AngularVelocityUnit.RPM),
-        pitch_diameter=solver.UNKNOWN,
-        face_width=solver.UNKNOWN,
-        desired_cycles=inputs.get("desired_cycles", 1e10),
+        pitch_diameter=get_value("ring.pitch_diameter", inputs, solver.UNKNOWN),
+        face_width=get_value("ring.face_width", inputs, solver.UNKNOWN),
+        desired_cycles=get_value("desired_cycles", inputs, 1e10),
         material=Steel,
-        quality_number=inputs.get("quality_number", 6),
-        is_crowned=inputs.get("is_crowned", False),
-        is_through_hardened=inputs.get("is_through_hardened", True),
-        pressure_angle=inputs.get("pressure_angle", Angle(20, AngleUnit.DEGREE)),
+        quality_number=get_value("quality_number", inputs, 6),
+        is_crowned=get_value("is_crowned", inputs, False),
+        pressure_angle=get_value("pressure_angle", inputs, Angle(20, AngleUnit.DEGREE)),
+        heat_treatment=get_value("ring_heat_treatment", inputs, "through"),
+        grade=get_value("ring_grade", inputs, 1),
     )
     unknowns["ring.pitch_diameter"] = Length
     unknowns["ring.face_width"] = Length
@@ -974,65 +1001,74 @@ def demo(**inputs):
     )
     operating_conditions.update(inputs)
 
-    constraints = [
-        om.EqualityConstraint(
-            selector=lambda params: [
-                params["planet.face_width"],
-                params["sun.face_width"],
-            ]
-        ),
-        om.EqualityConstraint(
-            selector=lambda params: [
-                params["ring.face_width"],
-                params["sun.face_width"],
-            ]
-        ),
-        om.NonlinearConstraint(
-            selector=lambda params: [
-                params["planet.pitch_diameter"],
-                params["sun.pitch_diameter"],
-            ],
-            func=lambda x: x[0] / x[1],
-            value=u_e,
-        ),
-        om.NonlinearConstraint(
-            selector=lambda params: [
-                params["sun.pitch_diameter"],
-                params["sun.face_width"],
-            ],
-            func=lambda x: x[1] / x[0],
-            value=face_width_to_diameter_ratio,
-        ),
-        om.NonlinearConstraint(
-            selector=lambda params: [
-                params["ring.pitch_diameter"],
-                params["sun.pitch_diameter"],
-                params["planet.pitch_diameter"],
-            ],
-            func=lambda x: x[0] - (x[1] + 2 * x[2]),
-            value=0,
-        ),
-    ]
+    if optimize:
+        constraints = [
+            om.EqualityConstraint(
+                selector=lambda params: [
+                    params["planet.face_width"],
+                    params["sun.face_width"],
+                ]
+            ),
+            om.EqualityConstraint(
+                selector=lambda params: [
+                    params["ring.face_width"],
+                    params["sun.face_width"],
+                ]
+            ),
+            om.NonlinearConstraint(
+                selector=lambda params: [
+                    params["planet.pitch_diameter"],
+                    params["sun.pitch_diameter"],
+                ],
+                func=lambda x: x[0] / x[1],
+                value=u_e,
+            ),
+            om.NonlinearConstraint(
+                selector=lambda params: [
+                    params["sun.pitch_diameter"],
+                    params["sun.face_width"],
+                ],
+                func=lambda x: x[1] / x[0],
+                value=face_width_to_diameter_ratio,
+            ),
+            om.NonlinearConstraint(
+                selector=lambda params: [
+                    params["ring.pitch_diameter"],
+                    params["sun.pitch_diameter"],
+                    params["planet.pitch_diameter"],
+                ],
+                func=lambda x: x[0] - (x[1] + 2 * x[2]),
+                value=0,
+            ),
+        ]
 
-    res, params = solver.solve_for_parameters(
-        func=Planetary.safety_factor,
-        target_value=1.0,
-        known_params={
-            "sun": sun,
-            "planet": planet,
-            "ring": ring,
-            "operating_conditions": operating_conditions,
-        },
-        unknown_params=unknowns,
-        bounds=bounds,
-        constraints=constraints,
-    )
+        res, params = solver.solve_for_parameters(
+            func=Planetary.safety_factor,
+            target_value=1.0,
+            known_params={
+                "sun": sun,
+                "planet": planet,
+                "ring": ring,
+                "operating_conditions": operating_conditions,
+            },
+            unknown_params=unknowns,
+            bounds=bounds,
+            constraints=constraints,
+        )
 
-    params["_n_P_C"] = Planetary.n_P_C(
-        N_S=N_S,
-        N_P=N_P,
-        N_R=N_R,
-        n_S_C=n_S_C,
-        n_R_C=None,
-    )
-    return res, params
+        params["_n_P_C"] = Planetary.n_P_C(
+            N_S=N_S,
+            N_P=N_P,
+            N_R=N_R,
+            n_S_C=n_S_C,
+            n_R_C=None,
+        )
+        return res, params
+    else:
+        return Planetary.safety_factor(
+            sun=sun,
+            planet=planet,
+            ring=ring,
+            operating_conditions=operating_conditions,
+            return_all=True,
+        )
